@@ -15,4 +15,4 @@ Raw data, if I get in the trade upon 1H range break and target the 50% level wit
 Script_2.pine
 19/03/2023 to 19/03/2026
 If I get in the trade at the 1,50 level with SL at 1.75
-728 trades Win rate of 19.23%. Unprofitable (profit factor 094)
+728 trades Win rate of 19.23%. Unprofitable (profit factor 0.94)
