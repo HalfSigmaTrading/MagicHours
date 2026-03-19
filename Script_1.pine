@@ -1,0 +1,135 @@
+//@version=5
+strategy("MagicHours_RawStats", overlay=true, margin_long=100, margin_short=100)
+
+// === INPUTS ===
+heure_trading = input.int(8,"Début de fenetre de trading")
+duree_trading = input.int(3,"Duree de la fenetre de trading en Heures")
+
+// Machine a états pour la stratégie
+// 0: ne rien faire - Attendre la bonne heure
+// 1: on est à la bonne heure, on attend la cassure d'un des cotés du Range
+// 2: Range 1H cassé, Break above ==> shorts, Break below ==> Longs
+// 3: En attente de l'exécution d'un ordre ==> Verifier que le trade se termine dans les 3H et qu'un mouvement ait déjà prit le niveau des 50%
+// 4: Ordre en cours ==> Verifier que le trade se termine dans les 3H
+// 5: trade fermé ==> faire une ligne de synthèse avec drawdown
+
+// Machine a états pour les statistiques
+// 0: ne rien faire - Attendre la bonne heure
+// 1: on est à la bonne heure, on attend la cassure d'un des cotés du Range
+// 2: Range 1H cassé, attendre le retour au niveau des 50%
+// 3: En attente de l'exécution d'un ordre ==> Verifier que le trade se termine dans les 3H et qu'un mouvement ait déjà prit le niveau des 50%
+// 4: Ordre en cours ==> Verifier que le trade se termine dans les 3H
+// 5: trade fermé ==> faire une ligne de synthèse avec drawdown
+
+
+string ny_tz  = "America/New_York" // Fuseau New York et calcul de l'heure courante
+var int etat = 0 // initialisation
+var table tble = table.new(position.bottom_right, 1, 1, frame_color=color.gray, frame_width=1) // Création d’une table 1×1 pour afficher la valeur
+var float h1_high = 0.0
+var float h1_low = 0.0
+var float priceRange = 0.0
+var float target_50 = 0.0
+var float level_S25 = 0.0
+var float level_S50 = 0.0
+var float level_S75 = 0.0
+var float level_L25 = 0.0
+var float level_L50 = 0.0
+var float level_L75 = 0.0
+var bool trade_LONG = false
+var string date_last_trade = ""
+
+
+// Computation at each iteration
+h = hour(time, ny_tz)
+session_en_cours = h >= heure_trading and h < heure_trading + duree_trading
+h1_high_previous_hour = request.security(syminfo.tickerid, "60", high[0])
+h1_low_previous_hour = request.security(syminfo.tickerid, "60", low[0])
+
+date_str = (dayofmonth(time, ny_tz) < 10 ? "0" : "") +
+           str.tostring(dayofmonth(time, ny_tz)) +
+           (month(time, ny_tz) < 10 ? "0" : "") +
+           str.tostring(month(time, ny_tz)) +
+           str.tostring(year(time, ny_tz))
+
+// Infos utilisateur
+if session_en_cours
+    // À chaque nouveau bar, on met à jour la cellule
+    table.cell(tble, 0, 0, str.format("Etat:{0}   High:{1}   Low:{2}", etat, h1_high, h1_low) + "   " + date_str + "   " + date_last_trade, text_color=color.white, bgcolor=color.green)
+else
+    table.cell(tble, 0, 0, "- Hors session -", text_color=color.white, bgcolor=color.black)
+
+// CONDITION MACHINE A ETAT
+// 0: ne rien faire - Attendre la bonne heure
+if etat == 0 and date_last_trade != date_str
+    if session_en_cours
+        etat := 1
+
+        // === RECUPERATION BOUGIE H1 PRECEDENTE ===
+        h1_high := h1_high_previous_hour
+        h1_low  := h1_low_previous_hour
+        priceRange := h1_high - h1_low
+        target_50 :=  (h1_high + h1_low)/2
+        level_S25 := h1_high + 0.25 * priceRange
+        level_S50 := h1_high + 0.5 * priceRange
+        level_S75 := h1_high + 0.75 * priceRange
+        level_L25 := h1_low - 0.25 * priceRange
+        level_L50 := h1_low - 0.5 * priceRange
+        level_L75 := h1_low - 0.75 * priceRange
+
+// CONDITION MACHINE A ETAT
+// 1: on est à la bonne heure, on attend la cassure d'un des cotés du Range
+if etat == 1
+    if low <= h1_low
+        trade_LONG := true
+        if strategy.position_size == 0
+            strategy.order("Long", strategy.long, qty=1)
+            strategy.exit("Long Exit", from_entry="Long", limit=target_50)
+        date_last_trade := date_str
+        etat := 2
+
+    if high >= h1_high
+        trade_LONG := false
+        if strategy.position_size == 0
+            strategy.order("Short", strategy.short, qty=1)
+            strategy.exit("Short Exit", from_entry="Short", limit=target_50)
+        date_last_trade := date_str
+        etat := 2
+
+// CONDITION MACHINE A ETAT
+// 2: Range 1H cassé, attendre le retour au niveau des 50%
+if etat == 2
+    if trade_LONG and high >= target_50
+        strategy.close_all()
+        etat := 0
+
+    if not trade_LONG and low <= target_50
+        strategy.close_all()
+        etat := 0
+
+// CONDITION MACHINE A ETAT
+// 5: trade fermé ==> faire une ligne de synthèse avec drawdown
+if etat == 5
+    etat := 0
+
+
+// Transition de session à fin de session
+if not session_en_cours and session_en_cours[1]
+    if strategy.position_size != 0
+        strategy.close_all()
+    etat := 0
+    
+
+
+
+
+
+// === PLOTS ===
+plot(h1_high, "H1 High", color=color.black)
+plot(h1_low, "H1 Low", color=color.black)
+
+plot(level_S25, "level_S25", color=color.white)
+plot(level_S50, "level_S50", color=color.white)
+plot(level_S75, "level_S75", color=color.white)
+plot(level_L25, "level_L25", color=color.white)
+plot(level_L50, "level_L50", color=color.white)
+plot(level_L75, "level_L75", color=color.white)
